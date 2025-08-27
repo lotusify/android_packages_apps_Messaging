@@ -40,7 +40,7 @@ jobs:
       shell: bash
 
     - name: Upload APK artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: messaging-apk
         path: |
