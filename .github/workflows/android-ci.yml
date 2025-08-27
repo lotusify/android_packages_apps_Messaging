@@ -1,47 +1,61 @@
-name: Android CI (Soong)
+name: Build LineageOS Messaging
 
 on:
   push:
-    branches: [ "lineage-22.2" ]
+    branches:
+      - 'lineage-21.0'
   pull_request:
-    branches: [ "lineage-22.2" ]
+    branches:
+      - 'lineage-21.0'
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      # Step 1: Checkout your repository's source code
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y git-core gnupg flex bison gperf build-essential \
-          zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
-          lib32ncurses-dev x11proto-core-dev libx11-dev lib32z-dev ccache \
-          libgl1-mesa-dev libxml2-utils xsltproc unzip bc python3
+      # Step 2: Install all the necessary dependencies for the build environment
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libwxgtk3.0-dev libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
 
-    - name: Clone Android build system (minimal)
-      run: |
-        git clone https://android.googlesource.com/platform/build.git build
-        git clone https://android.googlesource.com/platform/build/soong.git build/soong
-        git clone https://android.googlesource.com/platform/build/blueprint.git build/blueprint
+      # Step 3: Install the 'repo' tool, which is used for syncing the Android source
+      - name: Setup 'repo' tool
+        run: |
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          export PATH=~/bin:$PATH
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
 
-    - name: Build APK for messaging app
-      run: |
-        export PATH=$PWD/build/soong/scripts:$PATH
-        cd $GITHUB_WORKSPACE
-        build/soong/soong_ui.bash --make-mode messaging
+      # Step 4: Initialize and sync the LineageOS 21 (Android 14) source tree
+      - name: Initialize and Sync LineageOS Source
+        run: |
+          mkdir ~/lineage
+          cd ~/lineage
+          export PATH=~/bin:$PATH
+          # Using the same branch name as your repository for consistency
+          repo init -u https://github.com/LineageOS/android.git -b lineage-21.0 --depth=1
+          repo sync -c --no-tags --no-clone-bundle -j$(nproc --all) --force-sync
 
-    - name: Find and upload APK
-      run: |
-        find out/ -iname "messaging.apk" > apk_paths.txt
-        cat apk_paths.txt
-      shell: bash
+      # Step 5: Copy your Messaging app source into the LineageOS source tree
+      - name: Copy app source into tree
+        run: |
+          cd ~/lineage
+          # Remove the default Messaging directory and replace it with your source code
+          rm -rf packages/apps/Messaging
+          rsync -a $GITHUB_WORKSPACE/ packages/apps/Messaging/
 
-    - name: Upload APK artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: messaging-apk
-        path: |
-          $(cat apk_paths.txt)
+      # Step 6: Build the Messaging App module
+      - name: Build the Messaging App
+        run: |
+          cd ~/lineage
+          source build/envsetup.sh
+          # Use a suitable build target for LineageOS 21
+          breakfast lineage_sdk_phone_arm64
+          m messaging
