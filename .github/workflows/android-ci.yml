@@ -1,13 +1,12 @@
-name: Build LineageOS Messaging
+name: Build LineageOS Package
 
 on:
-  workflow_dispatch:
   push:
     branches:
-      - 'lineage-21.0'
+      - 'lineage-22.2'
   pull_request:
     branches:
-      - 'lineage-21.0'
+      - 'lineage-22.2'
 
 jobs:
   build:
@@ -21,8 +20,11 @@ jobs:
       # Step 2: Install all the necessary dependencies for the build environment
       - name: Install build dependencies
         run: |
+          # Add i386 architecture for 32-bit libraries required by the build system
+          sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libwxgtk3.0-dev libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
+          # Install dependencies, using updated package names for Ubuntu 24.04
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick libncurses-dev:i386 lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libwxgtk3.2-dev libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
 
       # Step 3: Install the 'repo' tool, which is used for syncing the Android source
       - name: Setup 'repo' tool
@@ -34,14 +36,14 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      # Step 4: Initialize and sync the LineageOS 21 (Android 14) source tree
+      # Step 4: Initialize and sync the LineageOS 22 source tree
       - name: Initialize and Sync LineageOS Source
         run: |
           mkdir ~/lineage
           cd ~/lineage
           export PATH=~/bin:$PATH
-          # Using the same branch name as your repository for consistency
-          repo init -u https://github.com/LineageOS/android.git -b lineage-21.0 --depth=1
+          # Using lineage-22.0 branch to match your project's version
+          repo init -u https://github.com/LineageOS/android.git -b lineage-22.0 --depth=1
           repo sync -c --no-tags --no-clone-bundle -j$(nproc --all) --force-sync
 
       # Step 5: Copy your Messaging app source into the LineageOS source tree
@@ -57,6 +59,6 @@ jobs:
         run: |
           cd ~/lineage
           source build/envsetup.sh
-          # Use a suitable build target for LineageOS 21
+          # Use a suitable build target for LineageOS 22
           breakfast lineage_sdk_phone_arm64
           m messaging
