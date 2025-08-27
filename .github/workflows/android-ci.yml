@@ -1,5 +1,4 @@
-name: Build LineageOS Package
-
+name: Build LineageOS Messaging
 on:
   push:
     branches:
@@ -11,54 +10,123 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      # Step 1: Checkout your repository's source code
-      - name: Checkout Repository
-        uses: actions/checkout@v3
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 512
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
 
-      # Step 2: Install all the necessary dependencies for the build environment
-      - name: Install build dependencies
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup build environment
         run: |
-          # Add i386 architecture for 32-bit libraries required by the build system
+          # Free up space
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          df -h
+
+      - name: Install minimal build dependencies
+        run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          # Install dependencies, using updated package names for Ubuntu 24.04
-          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick libncurses-dev:i386 lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libwxgtk3.2-dev libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache curl flex \
+            g++-multilib gcc-multilib git gnupg gperf \
+            imagemagick lib32readline-dev lib32z1-dev \
+            libncurses-dev libssl-dev libxml2-utils \
+            lzop rsync schedtool zip zlib1g-dev python3
 
-      # Step 3: Install the 'repo' tool, which is used for syncing the Android source
-      - name: Setup 'repo' tool
+      - name: Setup repo tool
         run: |
           mkdir -p ~/bin
           curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
           chmod a+x ~/bin/repo
-          export PATH=~/bin:$PATH
+          echo "$HOME/bin" >> $GITHUB_PATH
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      # Step 4: Initialize and sync the LineageOS 22 source tree
-      - name: Initialize and Sync LineageOS Source
+      - name: Setup ccache
+        run: |
+          ccache -M 2G
+          ccache -o compression=true
+          ccache -z
+
+      - name: Initialize minimal LineageOS source
         run: |
           mkdir ~/lineage
           cd ~/lineage
-          export PATH=~/bin:$PATH
-          # Using lineage-22.0 branch to match your project's version
-          repo init -u https://github.com/LineageOS/android.git -b lineage-22.0 --depth=1
-          repo sync -c --no-tags --no-clone-bundle -j$(nproc --all) --force-sync
+          repo init -u https://github.com/LineageOS/android.git -b lineage-22.0 --depth=1 --partial-clone
+          
+          mkdir -p .repo/local_manifests
+          cat > .repo/local_manifests/exclude.xml << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <manifest>
+            <!-- Remove unused projects to save space -->
+            <remove-project name="LineageOS/android_device_generic_arm64" />
+            <remove-project name="LineageOS/android_device_generic_x86" />
+            <remove-project name="LineageOS/android_device_generic_x86_64" />
+            <remove-project name="platform/development" />
+            <remove-project name="platform/cts" />
+            <remove-project name="platform/sdk" />
+          </manifest>
+          EOF
 
-      # Step 5: Copy your Messaging app source into the LineageOS source tree
-      - name: Copy app source into tree
+      - name: Sync essential components only
         run: |
           cd ~/lineage
-          # Remove the default Messaging directory and replace it with your source code
-          rm -rf packages/apps/Messaging
-          rsync -a $GITHUB_WORKSPACE/ packages/apps/Messaging/
+          repo sync -c --no-tags --no-clone-bundle -j2 \
+            build/make \
+            build/soong \
+            frameworks/base \
+            packages/apps/Messaging \
+            system/core \
+            bionic \
+            external/libcxx \
+            --force-sync
+          
+          # Check disk space
+          df -h
 
-      # Step 6: Build the Messaging App module
-      - name: Build the Messaging App
+      - name: Replace with custom Messaging app
+        run: |
+          cd ~/lineage
+          rm -rf packages/apps/Messaging
+          cp -r $GITHUB_WORKSPACE packages/apps/Messaging
+
+      - name: Setup build environment and build
         run: |
           cd ~/lineage
           source build/envsetup.sh
-          # Use a suitable build target for LineageOS 22
-          breakfast lineage_sdk_phone_arm64
-          m messaging
+          
+          export TARGET_PRODUCT=aosp_arm64
+          export TARGET_BUILD_VARIANT=eng
+          
+          export USE_CCACHE=1
+          export CCACHE_DIR=~/.ccache
+          
+          # Monitor disk space during build
+          df -h
+          
+          # Build only the Messaging app
+          m Messaging -j2
+          
+          # Check final build
+          ls -la out/target/product/generic_arm64/system/app/Messaging/ || true
+          df -h
+
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: messaging-apk
+          path: |
+            ~/lineage/out/target/product/*/system/app/Messaging/
+            ~/lineage/out/target/product/*/system/priv-app/Messaging/
+          retention-days: 7
