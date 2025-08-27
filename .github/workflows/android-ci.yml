@@ -1,6 +1,7 @@
 name: Build LineageOS Messaging
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - 'lineage-21.0'
